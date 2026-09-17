@@ -63,7 +63,7 @@ Preview environments **deploy an image into a shared cluster and route live traf
 | **Operator** | mirrord Operator **3.142.0+**, installed with the preview feature enabled. |
 | **CLI** | mirrord CLI **3.189.0+**. (The CI Action installs the latest automatically.) |
 | **Helm flag** | The operator must be deployed with preview environments enabled (see below). |
-| **License** | Preview environments require the **Enterprise** plan. A [free trial](https://app.metalbear.com/account/sign-up) is minted as Enterprise, so previews work for its duration; an agent working on a cluster with no license can start that trial itself — see the `mirrord-operator` skill's Agent-Started Trials section. |
+| **License** | Preview environments require the **Enterprise** plan. A [free trial](https://app.metalbear.com/account/sign-up) is minted as Enterprise, so previews work for its duration; an agent working on a cluster with no license can offer that trial and start it once the user agrees — see the `mirrord-operator` skill's Agent-Started Trials section. |
 | **Cluster access** | A valid kubeconfig reachable from wherever you run preview (laptop or CI runner). |
 | **A built, pushed image** | Preview deploys an *image*, not local source. The preview pod is a copy of the **target's pod spec with the image swapped**, so it pulls with the **same credentials as the target** — there is no separate registry config for previews. Push the preview tag to the **same registry and repository the target already pulls from**, or it fails with `ErrImagePull`. |
 
