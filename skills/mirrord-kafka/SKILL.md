@@ -75,7 +75,7 @@ kubectl get mirrordpropertylists --all-namespaces --no-headers 2>/dev/null
 kubectl get crd mirrordkafkatopicsconsumers.queues.mirrord.metalbear.co --no-headers 2>/dev/null
 ```
 
-If the operator is missing and the cluster has no mirrord for Teams license, an AI agent can start a seven-day Enterprise trial itself and install the operator: see the `mirrord-operator` skill, "Agent-started trial".
+If the operator is missing and the cluster has no mirrord for Teams license, an AI agent can offer the user a seven-day Enterprise trial and, once they agree, start it and install the operator: see the `mirrord-operator` skill, "Agent-started trial".
 
 Inspect the target workload to extract container names and env vars:
 ```bash

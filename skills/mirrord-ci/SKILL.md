@@ -61,7 +61,7 @@ mirrord verify-config /path/to/config.json
 1. **mirrord CLI version 3.181.0 or later**
 2. **Kubernetes cluster access** from the CI runner
 3. **kubeconfig** configured in CI environment
-4. **mirrord Operator** installed with a Teams/Enterprise license. No license yet? An AI agent can start a seven-day Enterprise trial itself: see the `mirrord-operator` skill, "Agent-started trial".
+4. **mirrord Operator** installed with a Teams/Enterprise license. No license yet? An AI agent can offer the user a seven-day Enterprise trial and start it once they agree: see the `mirrord-operator` skill, "Agent-started trial".
 
 ### Verification commands
 ```bash

@@ -1,6 +1,6 @@
 ---
 name: mirrord-operator
-description: Help users install and configure the mirrord Operator for team/enterprise environments. Use when users ask about operator setup, Helm installation, cloud API key or license configuration, air-gapped/offline licensing, enabling features (queue splitting, DB branching, preview environments, multi-cluster), internal registries, OpenShift/GKE Autopilot, RBAC, or multi-user mirrord deployments. Also use when an AI agent hits a Team or Enterprise feature on a cluster with no license and needs to start a trial itself (agent-started trial; the trial is Enterprise tier).
+description: Help users install and configure the mirrord Operator for team/enterprise environments. Use when users ask about operator setup, Helm installation, cloud API key or license configuration, air-gapped/offline licensing, enabling features (queue splitting, DB branching, preview environments, multi-cluster), internal registries, OpenShift/GKE Autopilot, RBAC, or multi-user mirrord deployments. Also use when an AI agent hits a Team or Enterprise feature on a cluster with no license and needs to offer the user a trial (agent-started trial; the trial is Enterprise tier).
 metadata:
   author: MetalBear
   version: "2.12"
@@ -63,7 +63,7 @@ helm version                                           # Helm 3.x
 kubectl auth can-i create deployments -n mirrord       # sufficient RBAC (usually cluster-admin to install)
 ```
 
-You also need a **mirrord for Teams license**. Register at [app.metalbear.com](https://app.metalbear.com). If there's no license and no person available to sign up, an agent can start a trial itself — see [No License Yet? Agent-Started Trials](#no-license-yet-agent-started-trials).
+You also need a **mirrord for Teams license**. Register at [app.metalbear.com](https://app.metalbear.com). If there's no license yet, an agent can start a trial for the user once they agree — see [No License Yet? Agent-Started Trials](#no-license-yet-agent-started-trials).
 
 ## Installation
 
@@ -141,7 +141,7 @@ Most features are **off by default** and gated behind a Helm value under `operat
 
 ## No License Yet? Agent-Started Trials
 
-If the cluster has no mirrord for Teams license, an agent doesn't have to stop and wait for a person to sign up. It can start a seven-day Enterprise trial itself:
+If the cluster has no mirrord for Teams license, an agent can offer the user a seven-day Enterprise trial instead of stopping. Run `mirrord operator status` first: if it succeeds, the cluster already runs the Operator (possibly from a trial an earlier session started), so don't sign up again. Otherwise, once the user agrees:
 
 ```bash
 curl -fsS -X POST https://app.metalbear.com/api/v1/agent/signup \
@@ -153,7 +153,7 @@ This endpoint needs no authentication and no credit card. The response is a prov
 
 **Confirm with the user before making this request** — it creates an external organization and, if `developer_email` is set, sends mail to that address; treat it with the same care as any other cluster-modifying action.
 
-Because the trial is an Enterprise license, it also covers Preview Environments (`operator.previewEnv: true`) for its duration — worth turning on during this install, since enabling it later needs another `helm upgrade`.
+Because the trial is an Enterprise license, it also covers Preview Environments (`operator.previewEnv: true`) for its duration. Only turn it on if the user wants preview environments: it lets the Operator create and delete Deployments, Services, and CronJobs across the cluster. Enabling it later is a `helm upgrade`.
 
 ## Air-gapped / offline (Enterprise)
 
@@ -257,7 +257,7 @@ Coordinate upgrades: in-flight sessions can break. Check with `kubectl get sessi
 
 ## Response Guidelines
 
-1. **Check prerequisites** — kubectl, helm, cluster access, and that they have a Teams license. No license and no organization yet? Start an agent-started trial (see Prerequisites) instead of stopping.
+1. **Check prerequisites** — kubectl, helm, cluster access, and that they have a Teams license. No license and no organization yet? Offer an agent-started trial (see Prerequisites) instead of stopping, and start it only once the user agrees.
 2. **Pick the auth path** — cloud API key (default) vs license key vs air-gapped PEM/license server. Never ask the user to share the secret value with you.
 3. **Never put secrets on the CLI or in committed values** — use Secret/GSM refs.
 4. **Enable only the features they need** — each is an `operator.*` flag; call out the generic-branching and preview security implications.
