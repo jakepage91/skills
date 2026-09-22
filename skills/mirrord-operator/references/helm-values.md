@@ -61,6 +61,7 @@ When generating the key, an org admin also chooses **identity sharing** (ticked 
 
 **Preview environments:** `previewEnv` (default `false`).
 - `shareIngress.shareDomain` — domain share hosts are minted under (`<slug>.<shareDomain>`, no leading `*.`); empty = no link sharing.
+- `shareIngress.stableSlugs` (default `false`) — mint share hosts without the random suffix, as `<sanitized key>.<shareDomain>`, so a link can be built from the session key alone (e.g. by a PR bot) before the preview starts. Guessable — only enable when the ingress in front of `mirrord-share-ingress` authenticates every request. One live session per host: a second session whose key sanitizes to the same host fails at creation. See the `mirrord-prev-env` skill.
 - `preview.cleanupAfterMins` (15), `preview.annotations`, `preview.labels`, `preview.idleHoldBufferMessages` (512), `preview.idleHoldBufferBytes` (8388608), `preview.imagePullPolicy`.
 
 **Other operator toggles:** `metrics` (Prometheus), `applicationPauseAutoSync` (ArgoCD), `suspendFluxControllers` (Flux), `isolatePodsRestart` (`true`), `injectSessionKeyHeader` (`true`), `disableTelemetries` (Enterprise only), `requireFrontProxyClientCert` (`true`).
@@ -80,6 +81,7 @@ When generating the key, an org admin also chooses **identity sharing** (ticked 
 | `sessionSetupDeadlineSeconds` | `180` | How long a session may wait for its first client connection (the "starting up" phase — e.g. while queue splitting waits for target pods to roll) before it's closed. Requires operator/chart `3.191.0`+. |
 | `sessionUnusedTtlSeconds` | `30` | How long a session may sit idle after its client disconnects (the "connected" phase) before it's closed. Raise for clients on slow/unreliable networks. Requires operator/chart `3.191.0`+. |
 | `maxSessionTimeSeconds` | unset | Cap on total session lifetime, spanning both phases above. The only value that can close a session someone is actively using. |
+| `communicationTimeoutMillis` | `60000` | How long either the client or the agent may go silent on an already-connected session before it's closed — the operator times each side separately and closes as soon as **either** exceeds this. Applies regardless of chart version; requires operator Helm chart `3.210.0`+ to actually **change** the value (earlier charts always apply the 60000 default). Symptom of hitting it: session drops with `Layer Communication Timeout` in the operator log. |
 | `noPodTargetsSessionTimeoutMillis` | `60000` | Timeout when no ready target pods. |
 | `subscribeEventBufferSize` | `2048` | `mirrord subscribe` event buffer depth. |
 | `copyTarget.useAgentImage` | `true` | Copy-target dummy container uses the agent image (has `sleep`). |

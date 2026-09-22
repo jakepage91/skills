@@ -6,7 +6,7 @@ Configure mirrord for isolated database branches during development. (Team / Ent
 
 This skill helps AI agents:
 - **Generate** valid `feature.db_branches` configs for mirrord.json
-- **Configure** MySQL, MariaDB, PostgreSQL, MSSQL, MongoDB, Redis, DynamoDB, ClickHouse, Google Spanner, and Generic branches
+- **Configure** MySQL, MariaDB, PostgreSQL, MSSQL, MongoDB, Redis, DynamoDB, ClickHouse, Google Spanner, Amazon S3, and Generic branches
 - **Set up** copy modes (empty, schema, all, filtered) and connection sources (env, Kubernetes Secret, ConfigMap, Google Secret Manager, AWS Secrets Manager, literal, composite, multiple)
 - **Run** schema migrations against a branch (Flyway or Liquibase)
 - **Configure** IAM authentication for AWS RDS, GCP Cloud SQL, and DynamoDB
@@ -30,6 +30,8 @@ This skill helps AI agents:
 "Configure DB branching with AWS RDS IAM authentication"
 
 "How do I filter which rows get copied to my database branch?"
+
+"Branch an S3 bucket so my app writes to a throwaway clone"
 ```
 
 ## Supported databases
@@ -45,6 +47,7 @@ This skill helps AI agents:
 | DynamoDB | `"dynamodb"` | Remote (local emulator) | IAM required for full copy |
 | ClickHouse | `"clickhouse"` | Remote | |
 | Google Spanner | `"spanner"` | Remote (emulator) | uses `SPANNER_EMULATOR_HOST` |
+| Amazon S3 | `"s3"` | Remote (your cloud account) | not a pod; `source.params.bucket`, `provider` |
 | Generic | `"generic"` | Remote | any service, your own image |
 
 ## Quick example

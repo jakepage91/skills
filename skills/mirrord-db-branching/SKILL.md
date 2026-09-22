@@ -1,9 +1,9 @@
 ---
 name: mirrord-db-branching
-description: Helps users configure mirrord.json for database branching, enabling isolated database copies for safe development and testing. Use when the user wants to set up MySQL, MariaDB, PostgreSQL, MSSQL, MongoDB, Redis, DynamoDB, ClickHouse, Google Spanner, or generic branches, configure copy modes, connection sources, schema migrations, IAM authentication, or manage database branches.
+description: Helps users configure mirrord.json for database branching, enabling isolated database copies for safe development and testing. Use when the user wants to set up MySQL, MariaDB, PostgreSQL, MSSQL, MongoDB, Redis, DynamoDB, ClickHouse, Google Spanner, Amazon S3, or generic branches, configure copy modes, connection sources, schema migrations, IAM authentication, or manage database branches.
 metadata:
   author: MetalBear
-  version: "2.6"
+  version: "2.7"
 ---
 
 # Mirrord DB Branching Skill
@@ -33,7 +33,7 @@ DB branching is a **Team / Enterprise** feature. It spins up an isolated branch 
 
 Authoritative docs (fetch sub-pages for engine-specific detail):
 - [DB Branching Overview](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/)
-- Engines: [MySQL](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/mysql/) · [PostgreSQL](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/postgresql/) · [MSSQL](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/mssql/) · [MongoDB](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/mongodb/) · [Redis](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/redis/) · [DynamoDB](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/dynamodb/) · [ClickHouse](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/clickhouse/) · [Google Spanner](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/spanner/) · [Generic](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/generic/)
+- Engines: [MySQL](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/mysql/) · [PostgreSQL](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/postgresql/) · [MSSQL](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/mssql/) · [MongoDB](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/mongodb/) · [Redis](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/redis/) · [DynamoDB](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/dynamodb/) · [ClickHouse](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/clickhouse/) · [Google Spanner](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/spanner/) · [S3](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/s3/) · [Generic](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/generic/)
 - [Connection Modes](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/connection/)
 - [IAM Authentication](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/iam-authentication/)
 - [Schema Migrations](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/migrations/)
@@ -105,6 +105,7 @@ mirrord verify-config /path/to/config.json
 | DynamoDB | `"dynamodb"` | Remote (local emulator pod) | empty, all, table filters | `iam_auth` **required** for `all` |
 | ClickHouse | `"clickhouse"` | Remote | empty, schema, all, filtered | |
 | Google Spanner | `"spanner"` | Remote (emulator pod) | empty, schema, all, filtered | uses `SPANNER_EMULATOR_HOST` |
+| Amazon S3 | `"s3"` | Remote (provider — your AWS account) | empty, all, `objects` regex | Not a pod; see [Amazon S3](#amazon-s3) |
 | Generic | `"generic"` | Remote | none (always empty) | any service, your own image |
 
 ### Shared Configuration Fields
@@ -114,8 +115,10 @@ mirrord verify-config /path/to/config.json
 | `type` | all | Database engine (see table above). |
 | `connection` | all (optional for DynamoDB) | How mirrord locates the source connection details. See [Connection Modes](#connection-modes). |
 | `id` | all | Reuse/share a branch: same `id` reattaches to an existing branch while its TTL hasn't expired. Use a unique value (e.g. a UUID) to avoid reusing someone else's branch. Ignored for local Redis. |
-| `name` | most | Source database name to clone. The override URL becomes `.../<name>`. If omitted, the URL points at the server and the app must select the DB. For **Redis**, `name` is the numeric DB **index** (default `0`). Required when using `migrations`. |
-| `version` | all except generic | Engine image version (e.g. `"8.0"`, `"16"`). For generic, the tag lives in `image` and `version` is not allowed. |
+| `name` | most | Source database name to clone. The override URL becomes `.../<name>`. If omitted, the URL points at the server and the app must select the DB. For **Redis**, `name` is the numeric DB **index** (default `0`). Required when using `migrations`. Not accepted for **S3** — a bucket isn't a server hosting several databases. |
+| `version` | all except generic, s3 | Engine image version (e.g. `"8.0"`, `"16"`). For generic, the tag lives in `image` and `version` is not allowed. Not accepted for S3 — there's no container to run. |
+| `provider` | s3 | Storage service hosting the branch bucket. Only `"AWS"` (default). |
+| `source` | s3 | Where to read the source bucket's name from (`connection` is accepted as an alias). Takes a single param, `bucket`. See [Amazon S3](#amazon-s3). |
 | `ttl_secs` / `ttl_mins` | all | Branch time-to-live, counted from when no session is using it. Default 5 minutes; **caps at 15 minutes**. The two are mutually exclusive. |
 | `creation_timeout_secs` | all | How long to wait for the branch to become ready. Default 60. Unrecoverable pod failures (e.g. `ImagePullBackOff`, `OOMKilled`) fail immediately instead of waiting. |
 | `copy` | all except generic | How the branch is cloned. See [Copy Modes](#copy-modes). |
@@ -143,6 +146,7 @@ Enable the matching Helm value on the operator chart, and meet the minimum versi
 | DynamoDB | 3.179.0 | 3.228.0 | 3.179.0 | `operator.dynamodbBranching: true` |
 | ClickHouse | 3.182.0 | 3.230.0 | 3.182.0 | `operator.clickhouseBranching: true` |
 | Google Spanner | 3.182.0 | 3.230.0 | 3.182.0 | `operator.spannerBranching: true` |
+| Amazon S3 | 3.208.0 | 3.252.0 | 3.208.0 | `operator.s3Branching: true` |
 | Generic | 3.183.0 | 3.232.0 | 3.183.0 | `operator.genericBranching: true` |
 | Schema migrations | 3.182.0 | 3.230.0 | 3.182.0 | (per engine above) |
 | Schema migrations: inherited target env (`container` flavor) | 3.191.0 | 3.238.0 | 3.191.0 | (per engine above) |
@@ -479,6 +483,31 @@ Spawns a Redis instance on your machine and redirects the app's Redis traffic to
 
 With `copy.mode: "all"`, the branch pod connects to the **source** Redis to read its keys. If the source only accepts TLS, a cluster admin provides the certificate material in a `MirrordPropertyList` named `redis-source-tls` (configurable via `operator.redisBranchConfig.dbPod.sourceTlsPropertyList`), in the same namespace as the target workload, backed by a Kubernetes `Secret` via `secretKeyRef` — never inlined. Supported properties: `tlsCaCert` (CA bundle to verify the source), `tlsClientCert` / `tlsClientKey` (mutual TLS, required together). At least one property must be set; its presence upgrades a plain `redis://` source URL (or host/port connection params) to TLS. This is admin/Helm-side setup, not a `db_branches` config field — mention it when a developer's Redis branch fails to copy from a TLS-only source. Requires operator/Helm chart **3.199.0+**.
 
+## Amazon S3
+
+Unlike every other engine, an S3 branch is **not a pod**: the operator has the storage provider create a new bucket in your own cloud account (named `mirrord-<10 random letters>-<source bucket name>`, in the source bucket's region), clones the source bucket's settings and (optionally) its objects into it, and rewrites your target's bucket env var(s) to point at the clone. Objects never pass through the cluster or your machine — the clone runs entirely inside the provider, using the operator's own cloud credentials.
+
+```json
+{
+  "feature": { "db_branches": [ {
+    "id": "uploads-bucket",
+    "type": "s3",
+    "provider": "AWS",
+    "source": { "params": { "bucket": "UPLOADS_BUCKET" } },
+    "copy": { "mode": "all", "objects": ["^fixtures/"] }
+  } ] }
+}
+```
+
+- `provider`: which storage service hosts the branch bucket. Optional, defaults to `"AWS"` ([Amazon S3](https://aws.amazon.com/s3/)) — the only provider today.
+- `source` (alias `connection`, so configs mirroring other engines work too): locates the source bucket. Takes exactly one param, `bucket` — the env var (or Kubernetes Secret / ConfigMap / literal / regex `value_pattern` source, same as other engines) holding the source bucket's name. Any other param (`host`, `port`, `user`, `password`, `database`, …) is a config error. A `secret`, `configmap`, `gcp_secret_manager`, or `aws_secrets_manager` source **must** set `env_var_name` — there's no branch pod whose environment could carry the value implicitly. An array of sources works too: the first entry locates the source bucket, and every entry is rewritten to the branch bucket.
+- `copy.mode`: `"empty"` (default) clones the bucket and its settings with no objects; `"all"` also copies objects matched by `copy.objects`, a list of regexes matched against object keys (any match copies the object; omitted or empty copies everything). Patterns aren't anchored automatically. The copy runs inside the provider, so a wide `"all"` costs provider-side copy time and request charges, and the session waits for it — narrow with `objects` whenever you can.
+- Fields that **don't apply** (rejected, or a config error): `version`, `image` (no container to run), `location` (the branch always lives in your cloud account), `profile` (no `s3BranchConfig` in the Helm chart), `migrations` (no database server), `iam_auth` (the operator uses its own cloud identity), `name` (a bucket isn't a server hosting several databases). The usual `id`, `ttl_secs`/`ttl_mins`, and `creation_timeout_secs` all work normally — raise `creation_timeout_secs` (default 60) for large buckets, since cloning takes time.
+- Bucket settings are cloned **best-effort**: object ownership controls, public access block, tags, versioning (if enabled), default encryption, CORS, and the bucket policy (with ARNs rewritten to the branch bucket) are copied; event notifications/EventBridge, replication, lifecycle rules, access logging, static website hosting, Object Lock, MFA delete, and per-object ACLs/storage classes are not. A setting the operator can't read or the branch bucket rejects is skipped rather than failing the branch — check what happened via the branch's `Ready` condition: `kubectl get branchdatabase <branch-name> -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'`.
+- Permissions: the operator clones with its **own** AWS credentials (IAM role assumption via `sa.roleArn` on the operator's Helm chart is the easiest path) — read-only actions on source buckets, plus full control scoped to `arn:aws:s3:::mirrord-*` (branch buckets are always prefixed `mirrord-`). Your local app and the target reach the branch bucket with their **own** credentials, not the operator's — if access to the source comes from an IAM identity policy rather than the bucket's own resource policy, extend that policy to `arn:aws:s3:::mirrord-*` too. See the [S3 branching docs](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching/s3/) for the full IAM policy JSON and SSE-KMS notes.
+
+If the operator doesn't support S3 branching, the session fails immediately: an older operator reports `mirrord operator <version> does not support feature S3 branching`, and one where the Helm value is off reports `feature S3 branching is not enabled on this mirrord operator`.
+
 ## Generic Branches
 
 For any stateful service mirrord has no built-in engine for (InfluxDB, Valkey, Cassandra, an internal service, …). A generic branch runs **your container image** and starts **empty by default** — no built-in copy modes, no IAM, a single redirected port. Prefer a first-class engine when one exists. When an empty branch isn't useful, add a [`copy` Job](#copying-data-into-the-branch) to populate it, or reference an admin [`profile`](#admin-profiles) that supplies one.
@@ -559,7 +588,7 @@ The `copy`/`profile` fields need a newer operator than base generic branching su
 
 ## Running & Branch Management
 
-Run your app with mirrord and the config above. mirrord creates (or reuses, by `id`) the branch, overrides the connection env var(s) to point at it, and destroys the branch when the TTL elapses with no active session. While a session is active, mirrord also sets up **portforwards** to the branch pod (usable from a GUI client like DBeaver/DataGrip).
+Run your app with mirrord and the config above. mirrord creates (or reuses, by `id`) the branch, overrides the connection env var(s) to point at it, and destroys the branch when the TTL elapses with no active session. While a session is active, mirrord also sets up **portforwards** to the branch pod (usable from a GUI client like DBeaver/DataGrip). S3 branches have no pod, so no portforward is set up for them.
 
 ```bash
 # Show status of running branches (a namespace, or -A for all)
@@ -587,6 +616,8 @@ mirrord db-branches connections
 | Wrong database connected | Verify the `connection` variable(s) match the app's actual env vars |
 | DynamoDB `all` fails | `iam_auth` is required for `copy.mode: all` |
 | Filters silently dropped | Table/collection filters are incompatible with `"mode": "all"` |
+| S3 branch rejects a field | `version`/`image`/`location`/`profile`/`migrations`/`iam_auth`/`name` don't apply to S3 — see [Amazon S3](#amazon-s3) |
+| S3 branch config error on a connection param | S3 only accepts the `bucket` param under `source`/`connection`; any other param (`host`, `port`, …) is rejected |
 | `migrations` rejected | `name` must be set, and the engine must be MySQL/MariaDB/PostgreSQL/MSSQL |
 | `container` migration fails re: connection variables | A `connection` via `secret`/`gcp_secret_manager`/`aws_secrets_manager` needs `env_var_name` set so the operator can redirect it into the migration Job's environment |
 | Generic branch never ready | Use an `http_get`/`exec` readiness probe; plain TCP can pass before the service is usable |
@@ -723,6 +754,18 @@ Otherwise, provide safe defaults and note assumptions.
     "location": "local",
     "connection": { "url": "REDIS_URL" },
     "local": { "runtime": "container", "container_runtime": "docker", "port": 6379 }
+  } ] }
+}
+```
+
+### S3 bucket branch with fixtures copied
+```json
+{
+  "feature": { "db_branches": [ {
+    "id": "uploads-bucket",
+    "type": "s3",
+    "source": { "params": { "bucket": "UPLOADS_BUCKET" } },
+    "copy": { "mode": "all", "objects": ["^fixtures/"] }
   } ] }
 }
 ```
