@@ -8,8 +8,8 @@ This skill helps AI agents:
 
 - **Generate** or explain `mirrord-up.yaml` (`common`, `services`, targets, filters, `run`)
 - **Guide** `mirrord up`, `mirrord up init`, and CLI flags (`-f`, `--key`, `-m`/`--mode`, `-u`)
-- **Explain** service modes: default **split** (auto HTTP filter based on the session key) vs. **replace** (local process takes over the service; the deployed workload is scaled to zero for the session and restored after) — and warn about `replace`'s impact on shared clusters
-- **Explain** queue splitting, which works automatically for services in both `split` and `replace` mode (no `mirrord-up.yaml` field needed) for supported brokers
+- **Explain** service modes: default **split** (auto HTTP filter based on the session key) vs. **replace** (local process takes over the service; the deployed workload is scaled to zero for the session and restored after) vs. **mirror** (matching traffic is copied to the local process while the deployed service keeps serving it, requires mirrord 3.258.0+) — and warn about `replace`'s impact on shared clusters
+- **Explain** queue splitting, which works automatically for services in `split`, `replace`, and `mirror` mode (no `mirrord-up.yaml` field needed) for supported brokers
 - **Explain** Tera templating in `mirrord-up.yaml` (`{{ key }}`, `get_env(...)`) for injecting the session key or per-developer environment values
 
 ## Example prompts

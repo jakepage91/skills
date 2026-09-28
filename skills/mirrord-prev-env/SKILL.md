@@ -3,7 +3,7 @@ name: mirrord-prev-env
 description: Help users create and manage mirrord preview environments — running a modified service as an isolated pod in a shared Kubernetes cluster, scoped by an environment key and HTTP/queue traffic filtering, so teams can validate and review changes against real traffic without affecting live services. Use when a developer wants to run "mirrord preview" ad hoc, share a preview via a link (mirrord-share-ingress), or wire preview environments into CI with the metalbear-co/mirrord-preview GitHub Action (e.g. per-PR previews, least-privilege cluster access).
 metadata:
   author: MetalBear
-  version: "2.4"
+  version: "2.5"
 ---
 
 # Mirrord Preview Environment Skill
@@ -193,17 +193,47 @@ Using `baggage` (W3C distributed-tracing baggage) means standards-aware librarie
 
 ## Targeting scaled-to-zero workloads (queue splitting only)
 
-A preview environment that **only splits queues** (no HTTP filtering, no DB branching) can target a workload — Deployment, Argo Rollout, or StatefulSet — with **no running pods**. This fits consumers that are auto-scaled on queue lag (e.g. with KEDA) and sit at zero replicas until messages arrive: the split needs nothing from a live pod, since the topic and consumer group are read from the workload's spec and messages flow through the queue itself. Matching messages reach the preview pod right away; unmatched ones wait on the target's temporary queue and are consumed once the workload scales back up (its new pods start with the split configuration already applied).
+A preview environment that **only splits queues** (no HTTP filtering, no DB branching) can target a workload — Deployment, Argo Rollout, or StatefulSet — with **no running pods**. (A [CronJob target](#targeting-cronjobs) never needs running pods either.) This fits consumers that are auto-scaled on queue lag (e.g. with KEDA) and sit at zero replicas until messages arrive: the split needs nothing from a live pod, since the topic and consumer group are read from the workload's spec and messages flow through the queue itself. Matching messages reach the preview pod right away; unmatched ones wait on the target's temporary queue and are consumed once the workload scales back up (its new pods start with the split configuration already applied).
 
 **KEDA caveat:** once queues are split, the target's autoscaler triggers still watch the *original* queue — which the operator is now draining — so they see no load and can scale the target to zero, with nothing left to consume the target's temporary queue (messages are then lost when the split ends). Set `operator.pauseKedaScaleIn: true` in the operator's Helm values to have the operator keep the target at a minimum of one replica and pause KEDA's scale-in (`autoscaling.keda.sh/paused-scale-in` on the `ScaledObject`) for the duration of the split — requires operator/chart **3.199.0+**. See the `mirrord-operator` skill for Helm setup.
 
 A preview that also uses HTTP filtering or DB branching still needs a running target pod — traffic is intercepted at the target's pods, and branch overrides are built from the env values the running container sees. Such a session is rejected at creation with `no Pod is ready to be a session target` rather than partially starting. This is unrelated to idle mode (which scales the *preview's own* pods to zero after inactivity) — the two combine freely.
 
+## Targeting CronJobs
+
+A preview environment can target a CronJob, so a flow that depends on a scheduled job (a nightly scan, a report generator, a cleanup) gets previewed with your image too:
+
+```bash
+mirrord preview start -t cronjob/nightly-scan -i myrepo/scan:pr-4821 -k pr-4821 -f mirrord.json
+```
+
+Instead of a Deployment, the operator creates an isolated **CronJob** named after the session — it copies the source CronJob's job settings (concurrency policy, history limits, deadlines, time zone) and pod spec, swaps in your image, and applies the same environment overrides, database branches, and file mounts any other preview gets. The copy is never suspended even when the source is, and the source CronJob is never modified. A preview of a CronJob target consists of the CronJob and the Jobs it creates, with no Service.
+
+Right after creating it, the operator triggers the CronJob once (a Job named `<session>-start`, marked like a `kubectl create job --from=cronjob/...` run) so you see a run immediately rather than waiting for the next scheduled time. After that it runs on its schedule until the session ends; every Job and pod it created is deleted with the session. Set `feature.preview.cronjob.trigger_on_start` to `false` to skip that immediate run, for jobs whose timing matters (a report that must only run in its window, a job that assumes the previous run finished).
+
+Override the inherited schedule with `feature.preview.cronjob.schedule` (Kubernetes CronJob syntax):
+
+```json
+{
+  "target": "cronjob/nightly-scan",
+  "feature": {
+    "preview": {
+      "image": "myrepo/scan:pr-4821",
+      "cronjob": { "schedule": "*/30 * * * *", "trigger_on_start": true }
+    }
+  }
+}
+```
+
+A CronJob preview has no long-running pod, so `feature.network.incoming` is ignored (with a warning), `feature.preview.idle` is rejected, and `feature.preview.replicas` doesn't apply. Database branch parameters using `value_pattern` need a running target pod to read the runtime value from, so they're rejected too — plain variable parameters still work.
+
+Requires operator **3.205.0+** and CLI **3.256.0+**, plus `create`/`delete`/`patch` on `batch/cronjobs` and `create` on `batch/jobs` for the operator — the Helm chart grants these when `operator.previewEnv` is enabled.
+
 ## Sharing a preview via a link
 
 By default, reaching a preview requires injecting the `baggage: mirrord-session=<key>` header — fine for developers (via the [mirrord Browser Extension](https://metalbear.com/mirrord/docs/using-mirrord/incoming-traffic/debug-from-browser) or `curl`), but a non-starter for a non-technical stakeholder. **`mirrord-share-ingress`** moves that header injection to a server-side component so a plain HTTPS link works with nothing to install on the recipient's side.
 
-- Each shareable preview is reachable at its own host, `<slug>.<shareDomain>`, printed by `mirrord preview start` as the `preview URL`. The `slug` mirrors the preview's key with a random suffix (e.g. `pr-myrepo-a1b2c3`) — recognizable but unguessable. When the TTL expires the host stops resolving and falls through to a "preview not found" page that redirects to your app domain.
+- Each shareable preview is reachable at its own host, `<slug>.<shareDomain>`, printed by `mirrord preview start` as the `preview URL`. The `slug` mirrors the preview's key with a random suffix (e.g. `pr-myrepo-a1b2c3`) — recognizable but unguessable ([stable share hosts](#stable-share-hosts) drop the suffix). When the TTL expires the host stops resolving and falls through to a "preview not found" page that redirects to your app domain.
 - **The preview URL works with any HTTP filter.** A preview with a custom `http_filter` (a path filter, a different header, composed filters) additionally routes requests carrying the share link's injected baggage header, so its own filter keeps working for regular traffic while the link always reaches the preview.
 
 **How it works:** `mirrord-share-ingress` runs as its own Deployment + Service, watches Preview Environments, matches each request's host to a live preview, injects `baggage: mirrord-session=<key>`, and forwards to that preview's target Service in-cluster. The operator's filtered steal then routes the request to the preview pod — exactly as the browser extension's header would, matching the injected header in addition to the session's own filter.
@@ -234,6 +264,22 @@ By default, reaching a preview requires injecting the `baggage: mirrord-session=
    ```bash
    kubectl create secret tls share-ingress-tls --cert=wildcard.crt --key=wildcard.key -n mirrord
    ```
+
+### Stable share hosts
+
+By default the slug carries a random suffix, so the link only exists once `mirrord preview start` prints it. A cluster admin can set `operator.shareIngress.stableSlugs: true` when the link needs to exist before that — for example a PR bot that posts the preview URL built from the PR number before the preview even starts:
+
+```yaml
+operator:
+  previewEnv: true
+  shareIngress:
+    shareDomain: preview.example.com
+    stableSlugs: true
+```
+
+With it on, the host is `<sanitized key>.<shareDomain>`: the key lowercased, every other character replaced with `-`, runs of `-` collapsed, and the whole label cut at 63 characters — a preview keyed `pr-myrepo-42` is reachable at `pr-myrepo-42.preview.example.com` regardless of whether the session has started yet.
+
+Since anyone who knows the key can build the link, it becomes guessable — only turn this on when the ingress in front of `mirrord-share-ingress` authenticates every request. A cluster allows only one live session per host: starting a second session whose key gives the same host fails immediately with `share host <host> is already held by live preview session <namespace>/<name>` — stop that session or pick a different key. Failed sessions and sessions being deleted don't hold their host, so restarting a preview under the same key reuses the same link.
 
 ## Mode 2 — CI with the mirrord-preview GitHub Action
 
@@ -423,7 +469,9 @@ The typical flow: on PR open/push, CI builds the image(s), pushes to a registry,
 | No `preview URL` / share link doesn't work | Link sharing needs `mirrord-share-ingress` installed with a `shareDomain` (see [Sharing a preview via a link](#sharing-a-preview-via-a-link)). A share host is minted regardless of `http_filter` — a custom filter still gets a link, it just additionally routes the injected baggage header alongside its own filter. |
 | Want to iterate locally against the same preview | Run `mirrord exec` with the same target + env key; the local session preempts the preview and the preview resumes when you stop. |
 | Need a config option the Action doesn't expose | Use `extra_config` (deep-merged JSON). |
-| `preview start` fails with `no Pod is ready to be a session target` | The preview uses HTTP filtering or DB branching, which need a running target pod, but the target has zero running pods. Only a **queue-splitting-only** preview can target a scaled-to-zero workload — see [Targeting scaled-to-zero workloads](#targeting-scaled-to-zero-workloads-queue-splitting-only). |
+| `preview start` fails with `no Pod is ready to be a session target` | The preview uses HTTP filtering or DB branching, which need a running target pod, but the target has zero running pods. Only a **queue-splitting-only** preview (or a [CronJob target](#targeting-cronjobs)) can target a workload with no running pods — see [Targeting scaled-to-zero workloads](#targeting-scaled-to-zero-workloads-queue-splitting-only). |
+| CronJob preview rejects `network.incoming`/`idle`/`replicas`/a `value_pattern` branch param | Expected — a CronJob preview has no long-running pod. See [Targeting CronJobs](#targeting-cronjobs). |
+| Second preview session fails with `share host <host> is already held by...` | [Stable share hosts](#stable-share-hosts) are enabled and another live session's key sanitizes to the same host. Stop that session or pick a different key. |
 
 ## Response Guidelines
 

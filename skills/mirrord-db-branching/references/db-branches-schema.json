@@ -1169,6 +1169,80 @@
             "type",
             "connection"
           ]
+        },
+        {
+          "description": "When configuring a branch for an Amazon S3 bucket, set `type` to `s3`.\n\nUnlike every other engine, an S3 branch is not a pod: the operator has the storage provider\ncreate a new bucket in your own cloud account, clones the source bucket's settings and\n(optionally) its objects into it, and rewrites the target's `bucket` env var(s) to point at\nthe clone. `version`, `image`, `location`, `profile`, `migrations`, `iam_auth`, and `name` do\nnot apply - there is no container, pod, database server, or multi-database server to speak of.\n\n`source` (an alias for `connection`, so configs mirroring the other engines work) takes\nexactly one param, `bucket` - the env var holding the source bucket's name. Any other param\nis a config error.\n\nExample:\n```json\n{\n  \"type\": \"s3\",\n  \"provider\": \"AWS\",\n  \"source\": { \"params\": { \"bucket\": \"UPLOADS_BUCKET\" } },\n  \"copy\": { \"mode\": \"all\", \"objects\": [\"^fixtures/\"] }\n}\n```",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "s3"
+            },
+            "provider": {
+              "title": "feature.db_branches[].provider (type: s3) {#feature-db_branches-s3-provider}",
+              "description": "Storage service hosting the branch bucket. Defaults to `\"AWS\"`, the only provider\ncurrently supported.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "AWS",
+                null
+              ],
+              "default": "AWS"
+            },
+            "source": {
+              "title": "feature.db_branches[].source (type: s3) {#feature-db_branches-s3-source}",
+              "description": "How to locate the source bucket's name. `connection` is accepted as an alias. Takes a\nsingle param, `bucket`; any other param (`host`, `port`, `user`, `password`, `database`,\n...) is a config error. A `secret`/`configmap`/`gcp_secret_manager`/`aws_secrets_manager`\nsource must set `env_var_name`, since there is no branch pod to carry the value\nimplicitly.",
+              "$ref": "#/definitions/DbBranchingConnectionSource"
+            },
+            "connection": {
+              "description": "Alias for `source`.",
+              "$ref": "#/definitions/DbBranchingConnectionSource"
+            },
+            "copy": {
+              "$ref": "#/definitions/S3BranchCopyConfig",
+              "default": {
+                "mode": "empty"
+              }
+            },
+            "creation_timeout_secs": {
+              "description": "Seconds to wait for a branch to become ready after creation. Defaults to 60. Raise\nfor large buckets - cloning objects takes time.",
+              "type": "integer",
+              "format": "uint64",
+              "default": 60,
+              "minimum": 0
+            },
+            "id": {
+              "description": "Optional stable id for reusing or sharing a branch across users.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ttl_mins": {
+              "description": "Branch TTL in minutes, counted from when the branch is last used. Mutually exclusive\nwith `ttl_secs`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "ttl_secs": {
+              "description": "Branch TTL in seconds, counted from when the branch is last used. Mutually exclusive\nwith `ttl_mins`. Defaults to 300, capped at 15 minutes.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
         }
       ]
     },
@@ -2243,6 +2317,46 @@
         },
         {
           "$ref": "#/definitions/RedisEnvSource"
+        }
+      ]
+    },
+    "S3BranchCopyConfig": {
+      "description": "How an S3 branch bucket is seeded from its source:\n\n- `empty` (default): clone the bucket and its settings, with no objects.\n- `all`: also copy objects matched by `objects`, a list of regular expressions matched\n  against object keys (any match copies the object; omitted or empty copies every object).\n  Patterns are not anchored automatically.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "empty"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "all"
+            },
+            "objects": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ]
         }
       ]
     },

@@ -7,7 +7,8 @@ Create and manage mirrord **preview environments** — run a modified service as
 This skill helps AI agents:
 - **Run** preview environments ad hoc with `mirrord preview start` / `status` / `stop`
 - **Wire** preview environments into CI with the `metalbear-co/mirrord-preview` GitHub Action (e.g. per-PR previews), or by calling the CLI directly, including least-privilege cluster access via the `mirrord-operator-ci` ClusterRole
-- **Share** a preview via a plain HTTPS link with `mirrord-share-ingress`
+- **Share** a preview via a plain HTTPS link with `mirrord-share-ingress`, optionally with a stable (pre-existing) host
+- **Target** a CronJob, not just a Deployment/StatefulSet/Rollout
 - **Build** the `mirrord.json` that drives a preview (target, traffic filter, TTL, timeout)
 - **Explain** traffic isolation via the environment `key` + `header_filter`, and header propagation across HTTP / gRPC / Kafka / SQS
 - **Troubleshoot** preview-specific issues (licensing, registry/image pulls, `--force` replacement, traffic routing, the never-Ready readinessGate, teardown)
