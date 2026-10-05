@@ -7,6 +7,8 @@ The contract every snippet implements:
 1. **Ingress:** read `baggage` from the request/message and put it in the context of this request/message.
 2. **Egress:** write the context's baggage onto every outgoing request/message.
 3. **Merge, don't replace:** the propagator serialises all members; never write a `baggage` value containing only `mirrord-session`.
+4. **Keep the existing propagator.** The global-propagator snippets below are for services that configure none. If the service already sets one (B3, X-Ray, Jaeger, Datadog, custom), add the baggage propagator to that existing call or to `OTEL_PROPAGATORS` instead. A second `Set...Propagator` call replaces the first and breaks the context the service already forwards.
+5. **Internal destinations only.** Client-side injection runs only for internal hosts. Each language section has an `isInternal` check; fill its suffix list from the hosts the service really calls (cluster DNS, internal domains), and strip `baggage` on clients that call external APIs.
 
 ## Go
 
@@ -19,14 +21,35 @@ import (
 )
 
 func init() {
+    // Only when the service sets no propagator. Otherwise add propagation.Baggage{}
+    // to its existing NewCompositeTextMapPropagator call.
     // No TracerProvider is needed for baggage-only propagation.
     otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
         propagation.TraceContext{}, propagation.Baggage{}))
 }
 
+var internalSuffixes = []string{".svc.cluster.local", ".internal.example.com"} // fill from real hosts
+
+func isInternal(host string) bool {
+    h := strings.ToLower(strings.Split(host, ":")[0])
+    if !strings.Contains(h, ".") { return true } // bare service name resolved in-cluster
+    for _, s := range internalSuffixes { if strings.HasSuffix(h, s) { return true } }
+    return false
+}
+
+// internalOnly injects context for internal hosts and strips baggage for everything else.
+type internalOnly struct{ internal, external http.RoundTripper }
+
+func (t internalOnly) RoundTrip(r *http.Request) (*http.Response, error) {
+    if isInternal(r.URL.Host) { return t.internal.RoundTrip(r) }
+    r = r.Clone(r.Context()); r.Header.Del("baggage")
+    return t.external.RoundTrip(r)
+}
+
 // HTTP: wrap the server handler and the client transport.
 handler = otelhttp.NewHandler(mux, "server")
-client := &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
+client := &http.Client{Transport: internalOnly{
+    internal: otelhttp.NewTransport(http.DefaultTransport), external: http.DefaultTransport}}
 // Outgoing requests must be built with the request's ctx: http.NewRequestWithContext(ctx, ...)
 
 // gRPC
@@ -61,12 +84,18 @@ handle(ctx, m)
 SQS (`aws-sdk-go-v2`):
 
 ```go
-// produce
+// produce — add only baggage, and only if it fits SQS's 10-attribute limit
+const sqsMaxAttributes = 10
 carrier := propagation.MapCarrier{}
 otel.GetTextMapPropagator().Inject(ctx, carrier)
-if input.MessageAttributes == nil { input.MessageAttributes = map[string]types.MessageAttributeValue{} }
-for k, v := range carrier {
-    input.MessageAttributes[k] = types.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String(v)}
+if b := carrier.Get("baggage"); b != "" {
+    _, exists := input.MessageAttributes["baggage"]
+    if exists || len(input.MessageAttributes) < sqsMaxAttributes {
+        if input.MessageAttributes == nil { input.MessageAttributes = map[string]types.MessageAttributeValue{} }
+        input.MessageAttributes["baggage"] = types.MessageAttributeValue{DataType: aws.String("String"), StringValue: aws.String(b)}
+    } else {
+        log.Printf("sqs: %d attributes already set, sending without baggage", len(input.MessageAttributes))
+    }
 }
 // consume — request the attributes, then extract per message
 recv.MessageAttributeNames = []string{"All"}
@@ -88,10 +117,18 @@ from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
 
+# Only when the service configures no propagator; otherwise set OTEL_PROPAGATORS
+# (e.g. "b3,baggage") or add W3CBaggagePropagator to its existing composite.
 set_global_textmap(CompositePropagator([TraceContextTextMapPropagator(), W3CBaggagePropagator()]))
+
+INTERNAL_SUFFIXES = (".svc.cluster.local", ".internal.example.com")  # fill from real hosts
+
+def is_internal(url: str) -> bool:
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    return "." not in host or host.endswith(INTERNAL_SUFFIXES)
 ```
 
-HTTP/gRPC: prefer the instrumentation packages (`opentelemetry-instrumentation-flask|django|fastapi|requests|httpx|grpc`) — they work without an exporter. Manual fallback:
+HTTP/gRPC: prefer the instrumentation packages (`opentelemetry-instrumentation-flask|django|fastapi|requests|httpx|grpc`) — they work without an exporter. They inject into every outgoing request, so strip `baggage` on external calls (e.g. a `requests` session or `httpx` event hook for external hosts that deletes the header). Manual fallback:
 
 ```python
 # server middleware
@@ -99,8 +136,10 @@ token = context.attach(extract(request.headers))
 try: ...handle...
 finally: context.detach(token)
 
-# client
-headers = {}; inject(headers); requests.get(url, headers=headers)
+# client — internal hosts only
+headers = {}
+if is_internal(url): inject(headers)
+requests.get(url, headers=headers)
 ```
 
 Kafka (`confluent_kafka`):
@@ -121,9 +160,15 @@ finally: context.detach(token)
 SQS (`boto3`):
 
 ```python
+SQS_MAX_ATTRIBUTES = 10
 carrier = {}; inject(carrier)
-attrs = {k: {"DataType": "String", "StringValue": v} for k, v in carrier.items()}
-sqs.send_message(QueueUrl=url, MessageBody=body, MessageAttributes={**existing, **attrs})
+attrs = dict(existing)
+if "baggage" in carrier:
+    if "baggage" in attrs or len(attrs) < SQS_MAX_ATTRIBUTES:
+        attrs["baggage"] = {"DataType": "String", "StringValue": carrier["baggage"]}
+    else:
+        log.warning("sqs: %d attributes already set, sending without baggage", len(attrs))
+sqs.send_message(QueueUrl=url, MessageBody=body, MessageAttributes=attrs)
 
 resp = sqs.receive_message(QueueUrl=url, MessageAttributeNames=["All"])
 for m in resp.get("Messages", []):
@@ -145,19 +190,27 @@ import { W3CBaggagePropagator, W3CTraceContextPropagator, CompositePropagator } 
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 
 context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+// Only when the service configures no propagator; otherwise add W3CBaggagePropagator
+// to its existing CompositePropagator or set OTEL_PROPAGATORS.
 propagation.setGlobalPropagator(new CompositePropagator({
   propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
 }));
+
+const INTERNAL_SUFFIXES = ['.svc.cluster.local', '.internal.example.com']; // fill from real hosts
+const isInternal = (url: string) => {
+  const host = new URL(url).hostname.toLowerCase();
+  return !host.includes('.') || INTERNAL_SUFFIXES.some((s) => host.endsWith(s));
+};
 ```
 
-HTTP: `@opentelemetry/instrumentation-http` (+ `-express` / `-fastify` / `-undici`) registered with `registerInstrumentations` — no exporter needed. Manual fallback:
+HTTP: `@opentelemetry/instrumentation-http` (+ `-express` / `-fastify` / `-undici`) registered with `registerInstrumentations` — no exporter needed. Those inject into every outgoing request; pass `ignoreOutgoingRequestHook` (http) / `ignoreRequestHook` (undici) returning `true` for non-internal hosts so no context is injected there. Manual fallback:
 
 ```ts
 // server (express)
 app.use((req, _res, next) => context.with(propagation.extract(context.active(), req.headers), next));
 // client
 const headers: Record<string, string> = {};
-propagation.inject(context.active(), headers);
+if (isInternal(url)) propagation.inject(context.active(), headers);
 await fetch(url, { headers });
 ```
 
@@ -195,6 +248,8 @@ new Worker(name, async (job) =>
 ## Java / Kotlin
 
 Prefer the OTel Java agent (no code) or Spring Boot Micrometer Tracing — see libraries.md. Without either, add `opentelemetry-api` + `opentelemetry-context` and set the propagator once:
+
+Only when the service configures no propagator — otherwise add `W3CBaggagePropagator` to its existing composite or to `otel.propagators`. With the agent, injection happens in every instrumented client; strip `baggage` in an interceptor on clients that call external hosts (OkHttp `Interceptor`, Spring `ClientHttpRequestInterceptor` / `ExchangeFilterFunction` registered after the agent's instrumentation).
 
 ```java
 TextMapPropagator prop = TextMapPropagator.composite(

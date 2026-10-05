@@ -35,14 +35,19 @@ Node (`@aws-sdk/s3-request-presigner`): pass `Metadata: { baggage }` on `PutObje
 
 ```python
 for rec in json.loads(m["Body"])["Records"]:          # unwrap SNS envelope first if via SNS
-    head = s3.head_object(Bucket=rec["s3"]["bucket"]["name"],
-                          Key=urllib.parse.unquote_plus(rec["s3"]["object"]["key"]))
+    obj = rec["s3"]["object"]
+    params = {"Bucket": rec["s3"]["bucket"]["name"], "Key": urllib.parse.unquote_plus(obj["key"])}
+    if obj.get("versionId"):
+        # On versioned buckets, read the version that produced this event: a later
+        # overwrite of the same key carries a different upload's baggage.
+        params["VersionId"] = obj["versionId"]
+    head = s3.head_object(**params)
     token = context.attach(propagate.extract({"baggage": head["Metadata"].get("baggage", "")}))
     try: handle(rec)
     finally: context.detach(token)
 ```
 
-The consumer needs `s3:GetObject` (HeadObject is authorised by it) — flag it if the IAM role lacks it.
+The consumer needs `s3:GetObject` (HeadObject is authorised by it), plus `s3:GetObjectVersion` on versioned buckets — flag it if the IAM role lacks them. On unversioned buckets an overwrite before the event is handled still returns the newer upload's metadata; note that race in the report if the app overwrites keys.
 
 **mirrord queue splitting** — on the queue's `queueConfig` `MirrordPropertyList`, set `s3_event: "true"` (plus `sns: "true"` for S3 → SNS → SQS); the operator then fetches the object's user metadata (needs `s3:GetObject`) and exposes it as `S3Metadata`:
 
@@ -88,8 +93,14 @@ Resumable uploads: the metadata goes on the session-initiating request — sign/
 def callback(message):
     obj = json.loads(message.data)
     token = context.attach(propagate.extract({"baggage": (obj.get("metadata") or {}).get("baggage", "")}))
-    try: handle(obj)
-    finally: context.detach(token); message.ack()
+    try:
+        handle(obj)
+        message.ack()          # ack only after success, so failures are redelivered
+    except Exception:
+        message.nack()
+        raise
+    finally:
+        context.detach(token)
 ```
 
 Notification **attributes** (`bucketId`, `objectId`, `eventType`, ...) never include custom metadata, so a `message_filter` on `baggage` can't match. Filter on the payload:
