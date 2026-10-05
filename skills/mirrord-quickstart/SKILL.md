@@ -44,8 +44,10 @@ If kubectl fails, help them configure it first.
 **Official guide:** Follow [mirrord installation documentation](https://mirrord.dev/docs/overview/quick-start/) for supported options (package managers, pinned release binaries with checksum verification, etc.).
 
 **Summary for the agent:**
-- **macOS / Linux:** Point the user to the official docs for Homebrew, apt, or pinned binary install steps.
+- **macOS / Linux:** Point the user to the official docs for Homebrew, apt, or pinned binary install steps — do not invent or paste one-liners that fetch and execute remote scripts.
 - **Windows:** Point the user to the official docs for supported installers.
+
+> **Security:** Prefer package managers or manually verified binaries from official release artifacts. Never execute installation by piping downloaded content into a shell.
 
 **Verify installation:**
 ```bash
