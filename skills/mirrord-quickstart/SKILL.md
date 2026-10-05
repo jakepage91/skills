@@ -99,9 +99,9 @@ If `mirrord ls` returns no targets, check that the kubeconfig context points at 
 
 After running, verify the connection:
 
-1. **Check logs** - mirrord initialization messages should appear when the session starts:
+1. **Check logs** - mirrord's startup progress (agent started, connected to the target) prints before your app's own output:
 ```bash
-mirrord exec --target pod/<pod-name> -- <your-command> 2>&1 | head -20
+mirrord exec --target pod/<pod-name> -- <your-command>
 ```
 2. **Test environment** - Remote env vars should be available locally:
 ```bash
