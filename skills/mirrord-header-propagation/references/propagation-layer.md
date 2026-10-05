@@ -52,10 +52,41 @@ client := &http.Client{Transport: internalOnly{
     internal: otelhttp.NewTransport(http.DefaultTransport), external: http.DefaultTransport}}
 // Outgoing requests must be built with the request's ctx: http.NewRequestWithContext(ctx, ...)
 
-// gRPC
+// gRPC server
 grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
-grpc.NewClient(addr, grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
+
+// gRPC client: a ClientConn has one fixed target, so classify it once when dialing.
+// Internal targets get the propagating handler. External targets get no handler, plus
+// interceptors that remove any baggage metadata the app set by hand.
+func grpcClientOpts(target string) []grpc.DialOption {
+    host := target
+    if i := strings.Index(host, "///"); i >= 0 { host = host[i+3:] } // "dns:///svc.ns.svc.cluster.local:443"
+    if isInternal(host) {
+        return []grpc.DialOption{grpc.WithStatsHandler(otelgrpc.NewClientHandler())}
+    }
+    return []grpc.DialOption{
+        grpc.WithUnaryInterceptor(func(ctx context.Context, method string, req, reply any,
+            cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+            return invoker(stripBaggage(ctx), method, req, reply, cc, opts...)
+        }),
+        grpc.WithStreamInterceptor(func(ctx context.Context, desc *grpc.StreamDesc,
+            cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+            return streamer(stripBaggage(ctx), desc, cc, method, opts...)
+        }),
+    }
+}
+
+func stripBaggage(ctx context.Context) context.Context {
+    md, ok := metadata.FromOutgoingContext(ctx)
+    if !ok { return ctx }
+    md = md.Copy(); md.Delete("baggage")
+    return metadata.NewOutgoingContext(ctx, md)
+}
+
+conn, err := grpc.NewClient(target, append(grpcClientOpts(target), creds)...)
 ```
+
+Build every client connection through `grpcClientOpts` so each one is classified. Don't add `otelgrpc.NewClientHandler()` to clients directly.
 
 Kafka (any client) — a carrier over the client's header slice. Example for `segmentio/kafka-go`:
 
@@ -111,6 +142,8 @@ Goroutines: pass `ctx` into anything started from a handler. `go work()` without
 ## Python
 
 ```python
+import urllib.parse
+
 from opentelemetry import baggage, context
 from opentelemetry.propagate import inject, extract, set_global_textmap
 from opentelemetry.propagators.composite import CompositePropagator
