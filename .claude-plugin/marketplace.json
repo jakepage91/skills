@@ -25,7 +25,8 @@
         "./skills/mirrord-temporal",
         "./skills/mirrord-prev-env",
         "./skills/mirrord-up",
-        "./skills/mirrord-chaos"
+        "./skills/mirrord-chaos",
+        "./skills/mirrord-header-propagation"
       ]
     }
   ]

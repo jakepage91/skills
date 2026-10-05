@@ -2,7 +2,7 @@
 
 # mirrord Agent Skills
 
-Ten [Agent Skills](https://agentskills.io/home) that close the AI agent feedback loop on Kubernetes: real env vars, real DNS, real network, real traffic, real databases, real Kafka, real Temporal task queues, real preview environments, multi-service local sessions, and real failure conditions. Built by [MetalBear](https://metalbear.com/) to be used with [mirrord](https://metalbear.com/mirrord/).
+Eleven [Agent Skills](https://agentskills.io/home) that close the AI agent feedback loop on Kubernetes: real env vars, real DNS, real network, real traffic, real databases, real Kafka, real Temporal task queues, real preview environments, multi-service local sessions, real failure conditions, and the header propagation that lets a session follow a request across services and queues. Built by [MetalBear](https://metalbear.com/) to be used with [mirrord](https://metalbear.com/mirrord/).
 
 AI coding agents work from what's in their context window. Your Kubernetes cluster is full of state that isn't. These skills teach your agent how and when to use mirrord so the code it writes against your live infrastructure stops being informed guessing.
 
@@ -21,7 +21,7 @@ AI coding agents work from what's in their context window. Your Kubernetes clust
 codex plugin marketplace add metalbear-co/skills
 ```
 
-Then install the `mirrord` plugin from `/plugins`. All ten skills come with it.
+Then install the `mirrord` plugin from `/plugins`. All eleven skills come with it.
 
 ### OpenCode
 
@@ -31,7 +31,7 @@ OpenCode loads skills natively, so there's nothing to register — the skills ju
 curl -fsSL https://raw.githubusercontent.com/metalbear-co/skills/main/install.sh | sh
 ```
 
-That writes the ten skill folders into `~/.config/opencode/skills/`. Restart OpenCode and they're available. Re-run it any time to update — it replaces the `mirrord-*` folders and leaves your other skills alone.
+That writes the eleven skill folders into `~/.config/opencode/skills/`. Restart OpenCode and they're available. Re-run it any time to update — it replaces the `mirrord-*` folders and leaves your other skills alone.
 
 The same script serves any agent that reads a skills directory:
 
@@ -51,7 +51,7 @@ npx skills add metalbear-co/skills
 
 The [`ports/`](./ports/) directory carries the same core content as drop-in rules files: copy [`ports/github-copilot/copilot-instructions.md`](./ports/github-copilot/copilot-instructions.md) into your repo's `.github/`, or [`ports/cline/.clinerules`](./ports/cline/.clinerules) into your repo root. Want another format? [Open an issue](https://github.com/metalbear-co/skills/issues) with the target you'd like next.
 
-## The ten skills
+## The eleven skills
 
 | Skill | What it does |
 |-------|--------------|
@@ -65,6 +65,7 @@ The [`ports/`](./ports/) directory carries the same core content as drop-in rule
 | [mirrord-prev-env](./skills/mirrord-prev-env/) | Preview environments: deploy a built image as an isolated, traffic-filtered pod in a shared cluster — ad hoc or per-PR in CI. |
 | [mirrord-up](./skills/mirrord-up/) | Multiple concurrent local sessions from `mirrord-up.yaml` — compose-style multi-service debugging. |
 | [mirrord-chaos](./skills/mirrord-chaos/) | Chaos testing: inject latency or connection errors into a session's outgoing traffic via per-session rules, interactively or in CI. |
+| [mirrord-header-propagation](./skills/mirrord-header-propagation/) | Propagate the `baggage` session header across HTTP, gRPC, queues (Kafka, RabbitMQ, SQS, Pub/Sub, ...) and storage-triggered flows, reusing existing OpenTelemetry/Datadog where possible, and report the flows that still drop it. |
 
 ## Example prompts
 
@@ -80,6 +81,7 @@ Once installed, your agent activates the right skill based on the prompt:
 - "Spin up a per-PR preview environment in GitHub Actions so the team can review my change against real traffic."
 - "Generate a mirrord-up.yaml so I can debug my auth and dashboard services together."
 - "Make 30% of my service's calls to the payments API time out, so I can test our retry logic."
+- "Make the mirrord session header follow requests through our Kafka and SQS consumers."
 
 ## Trusted by
 
