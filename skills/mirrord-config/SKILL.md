@@ -189,7 +189,7 @@ Use JSON Pointer style: `/feature/network/incoming/mode`
 ## Example Scenarios
 
 **"Connect to pod api-7c8d9 in staging, steal traffic on port 8080, exclude secret env vars"**
-→ Read references, generate a minimal config with target, `network.incoming`, and `env.exclude`:
+→ Read references, generate a minimal config with target, `network.incoming`, and `env.exclude`. Default to a filtered steal on the session key so only requests tagged for this session reach the local app, and the rest of the cluster's traffic is left alone:
 
 ```json
 {
@@ -203,14 +203,17 @@ Use JSON Pointer style: `/feature/network/incoming/mode`
     },
     "network": {
       "incoming": {
-        "mode": "steal"
+        "mode": "steal",
+        "http_filter": {
+          "header_filter": "^baggage: .*mirrord-session={{ key }}.*$"
+        }
       }
     }
   }
 }
 ```
 
-The local app listening on port 8080 is what makes mirrord steal that port — no port key is needed, so none is added.
+The local app listening on port 8080 is what makes mirrord steal that port — no port key is needed, so none is added. Requests reach the local app only when they carry `mirrord-session=<key>` in their W3C `baggage` header. Drop `http_filter` only when the user explicitly wants every request on the port.
 
 **User provides invalid JSON with trailing comma**
 → Parse error → Fix syntax → Validate against schema → Explain issues → Provide corrected config

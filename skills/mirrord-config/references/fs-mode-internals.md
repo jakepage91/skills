@@ -20,5 +20,5 @@ the default config — no `fs` setting is needed for that.
 ## What `localwithoverrides` reads remotely
 
 `localwithoverrides` reads only `/etc/resolv.conf`, `/etc/hosts` and `/etc/hostname` remotely
-by default (`read_remote_by_default.rs`) — plus whatever you add to `fs.read_only` /
+by default ([`read_remote_by_default.rs`](https://github.com/metalbear-co/mirrord/blob/989aa3bb76682f8d7869752ea33fb50af8dd14f7/mirrord/layer-lib/src/file/unix/read_remote_by_default.rs#L3-L16)) — plus whatever you add to `fs.read_only` /
 `fs.read_write`.
